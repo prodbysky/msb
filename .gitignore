@@ -1,2 +1,7 @@
 /target
 build.msb
+examples/complex/add.o
+examples/complex/div.o
+examples/complex/main
+examples/complex/mul.o
+examples/complex/sub.o

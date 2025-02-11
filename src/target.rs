@@ -77,12 +77,7 @@ impl Target {
             .filter(|s| !s.is_empty())
             .collect();
 
-        Ok(Target {
-            name,
-            file_dependencies: file_deps,
-            target_dependencies: target_deps,
-            commands,
-        })
+        Ok(Target::new(name, file_deps, target_deps, commands))
     }
 }
 
@@ -164,10 +159,12 @@ impl Makefile {
 }
 impl Target {
     pub fn build(&self, file: &Makefile) -> Option<()> {
+        let pre_build = std::time::Instant::now();
         for t_dep in &self.target_dependencies {
             file.get_target(t_dep)?.build(file);
         }
 
+        let mut build_children = vec![];
         for cmd in self
             .commands
             .iter()
@@ -177,8 +174,17 @@ impl Target {
             let args = &cmd[1..];
             let mut cmd = std::process::Command::new(exe);
             cmd.args(args);
-            cmd.spawn().unwrap().wait().unwrap();
+            build_children.push(cmd.spawn().unwrap());
         }
+
+        for mut c in build_children {
+            c.wait().unwrap();
+        }
+        println!(
+            "Building target `{}` took: {:.2?}",
+            self.name,
+            pre_build.elapsed()
+        );
 
         Some(())
     }
