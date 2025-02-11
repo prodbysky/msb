@@ -1,0 +1,12 @@
+[package]
+name = "msb"
+version = "0.0.1"
+edition = "2021"
+authors = ["prodbysky"]
+license = "MIT"
+description = "Build system in Rust"
+repository = "https://github.com/prodbysky/msb"
+
+[dependencies]
+error-stack = "0.5.0"
+thiserror = "2.0.11"
