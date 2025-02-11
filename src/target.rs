@@ -154,6 +154,28 @@ impl FromStr for Makefile {
         Ok(Makefile { targets })
     }
 }
+impl Target {
+    pub fn build(&self, file: &Makefile) -> Option<()> {
+        for t_dep in &self.target_dependencies {
+            file.get_target(t_dep)?.build(file);
+        }
+
+        for cmd in self
+            .commands
+            .iter()
+            .map(|s| s.split_whitespace().collect::<Vec<_>>())
+        {
+            let exe = cmd[0];
+            let args = &cmd[1..];
+            let mut cmd = std::process::Command::new(exe);
+            cmd.args(args);
+            cmd.spawn().unwrap().wait().unwrap();
+        }
+
+        Some(())
+    }
+}
+
 impl Makefile {
     pub fn get_targets(&self) -> &Vec<Target> {
         &self.targets
@@ -161,5 +183,11 @@ impl Makefile {
 
     pub fn get_target(&self, name: &str) -> Option<&Target> {
         self.targets.iter().find(|t| t.name == name)
+    }
+
+    pub fn build(self, target: &str) -> Option<()> {
+        self.get_target(target)?.build(&self);
+
+        Some(())
     }
 }

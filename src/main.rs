@@ -11,7 +11,7 @@ fn main() -> AppResult {
         std::fs::read_to_string(&config.input_name).change_context(AppError::FailedToReadInput)?;
 
     let targets = target::Makefile::from_str(input_content.as_str()).unwrap();
-    dbg!(targets);
+    targets.build(&config.target);
 
     Ok(())
 }
@@ -36,6 +36,7 @@ type ConfigResult = error_stack::Result<Config, ConfigError>;
 
 struct Config {
     input_name: std::path::PathBuf,
+    target: String,
 }
 
 impl Config {
@@ -60,7 +61,11 @@ impl Config {
         if !input_name.exists() || !input_name.is_file() {
             return Err(ConfigError::BuildFileDoesNotExist(as_str).into());
         }
+        let target_name = args.next().map_or("main".to_string(), |o| o);
 
-        Ok(Self { input_name })
+        Ok(Self {
+            input_name,
+            target: target_name,
+        })
     }
 }
