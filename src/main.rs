@@ -1,5 +1,4 @@
 mod target;
-use std::str::FromStr;
 
 use error_stack::ResultExt;
 use thiserror::Error;
@@ -10,7 +9,9 @@ fn main() -> AppResult {
     let input_content =
         std::fs::read_to_string(&config.input_name).change_context(AppError::FailedToReadInput)?;
 
-    let targets = target::Makefile::from_str(input_content.as_str()).unwrap();
+    let targets = target::Makefile::from_str(input_content.as_str())
+        .change_context(AppError::FailedToParseBuildFile)
+        .attach_printable("failed to parse the .msb file")?;
     targets.build(&config.target);
 
     Ok(())
@@ -22,6 +23,8 @@ enum AppError {
     FailedToParseConfig,
     #[error("A file system error occured when reading input build config")]
     FailedToReadInput,
+    #[error("Failed to parse .msb file")]
+    FailedToParseBuildFile,
 }
 
 type AppResult = error_stack::Result<(), AppError>;

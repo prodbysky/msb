@@ -1,4 +1,5 @@
-use std::str::FromStr;
+use error_stack::ResultExt;
+use thiserror::Error;
 
 #[derive(Debug)]
 pub struct Target {
@@ -24,28 +25,31 @@ impl Target {
     }
 }
 
-#[derive(Debug)]
-pub struct ParseError {
-    message: String,
+#[derive(Debug, Error)]
+pub enum ParseError {
+    #[error("Invalid target format found")]
+    InvalidTarget,
+    #[error("Invalid target header format found")]
+    InvalidTargetHeader,
+    #[error("Invalid dependencies format found")]
+    InvalidDependencies,
+    #[error("Missmatched braces found")]
+    MissmatchedBracesInFile,
 }
 
-impl FromStr for Target {
-    type Err = ParseError;
+pub type ParseResult<T> = error_stack::Result<T, ParseError>;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl Target {
+    fn from_str(s: &str) -> ParseResult<Target> {
         let parts: Vec<&str> = s.trim().split('{').collect();
         if parts.len() != 2 {
-            return Err(ParseError {
-                message: "Invalid target format".to_string(),
-            });
+            return Err(ParseError::InvalidTarget.into());
         }
 
         let header = parts[0].trim();
         let header_parts: Vec<&str> = header.split('[').collect();
         if header_parts.len() != 2 {
-            return Err(ParseError {
-                message: "Invalid header format".to_string(),
-            });
+            return Err(ParseError::InvalidTargetHeader.into());
         }
 
         let name = header_parts[0]
@@ -72,12 +76,10 @@ impl FromStr for Target {
     }
 }
 
-fn parse_dependencies(deps_str: &str) -> Result<(Vec<String>, Vec<String>), ParseError> {
+fn parse_dependencies(deps_str: &str) -> ParseResult<(Vec<String>, Vec<String>)> {
     let parts: Vec<&str> = deps_str.split("targets(").collect();
     if parts.len() != 2 {
-        return Err(ParseError {
-            message: "Invalid dependencies format".to_string(),
-        });
+        return Err(ParseError::InvalidDependencies.into());
     }
 
     let files_str = parts[0]
@@ -114,10 +116,8 @@ pub struct Makefile {
     targets: Vec<Target>,
 }
 
-impl FromStr for Makefile {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl Makefile {
+    pub fn from_str(s: &str) -> ParseResult<Makefile> {
         let mut targets = Vec::new();
         let mut current_target = String::new();
         let mut brace_count = 0;
@@ -136,19 +136,17 @@ impl FromStr for Makefile {
 
             if brace_count == 0 && !current_target.trim().is_empty() {
                 if current_target.contains("target") {
-                    match Target::from_str(&current_target) {
-                        Ok(target) => targets.push(target),
-                        Err(e) => return Err(e),
-                    }
+                    targets.push(
+                        Target::from_str(&current_target)
+                            .attach_printable("Failed to parse some target")?,
+                    );
                 }
                 current_target.clear();
             }
         }
 
         if brace_count != 0 {
-            return Err(ParseError {
-                message: "Unmatched braces in input".to_string(),
-            });
+            return Err(ParseError::MissmatchedBracesInFile.into());
         }
 
         Ok(Makefile { targets })
@@ -187,7 +185,6 @@ impl Makefile {
 
     pub fn build(self, target: &str) -> Option<()> {
         self.get_target(target)?.build(&self);
-
         Some(())
     }
 }
