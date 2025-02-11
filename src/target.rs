@@ -23,6 +23,16 @@ impl Target {
             commands,
         }
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn file_dependencies(&self) -> &[String] {
+        &self.file_dependencies
+    }
+    pub fn target_dependencies(&self) -> &[String] {
+        &self.target_dependencies
+    }
 }
 
 #[derive(Debug, Error)]
