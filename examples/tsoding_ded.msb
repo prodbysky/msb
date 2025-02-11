@@ -1,15 +1,5 @@
 target main [files() targets(source)] {
-    gcc -Wall -Wextra -std=c11 -pedantic -ggdb \
-    -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/freetype2 \
-    -I/usr/include/libpng16 -DWITH_GZFILEOP \
-    -I/usr/include/harfbuzz -I/usr/include/glib-2.0 \
-    -I/usr/lib64/glib-2.0/include \
-    -I/usr/include/sysprof-6 -pthread \
-    -o ded/ded \
-    ded/src/main.c ded/src/la.c ded/src/editor.c \
-    ded/src/file_browser.c ded/src/free_glyph.c \
-    ded/src/simple_renderer.c ded/src/common.c ded/src/lexer.c -lm \
-    -lSDL2 -lGLEW -lGL -lX11 -lGLU -lOpenGL -lfreetype
+    gcc -Wall -Wextra -std=c11 -pedantic -ggdb -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/freetype2 -I/usr/include/libpng16 -DWITH_GZFILEOP -I/usr/include/harfbuzz -I/usr/include/glib-2.0 -I/usr/lib64/glib-2.0/include -I/usr/include/sysprof-6 -pthread -o ded/ded ded/src/main.c ded/src/la.c ded/src/editor.c ded/src/file_browser.c ded/src/free_glyph.c ded/src/simple_renderer.c ded/src/common.c ded/src/lexer.c -lm -lSDL2 -lGLEW -lGL -lX11 -lGLU -lOpenGL -lfreetype
 }
 
 target source [files() targets()] {
