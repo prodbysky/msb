@@ -24,97 +24,6 @@ pub struct Target {
     commands: Vec<String>,
 }
 
-fn identifier(input: &str) -> IResult<&str, &str> {
-    alphanumeric1(input)
-}
-
-fn file_identifier(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
-}
-
-fn parse_outputs(input: &str) -> IResult<&str, Vec<String>> {
-    delimited(
-        tag("outputs("),
-        separated_list0(multispace1, map(file_identifier, |s: &str| s.to_string())),
-        tag(")"),
-    )
-    .parse(input)
-}
-
-fn parse_files(input: &str) -> IResult<&str, Vec<String>> {
-    delimited(
-        tag("files("),
-        separated_list0(multispace1, map(file_identifier, |s: &str| s.to_string())),
-        tag(")"),
-    )
-    .parse(input)
-}
-
-fn target_identifier(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| !c.is_whitespace() && c != ',' && c != ')')(input)
-}
-
-fn parse_target_deps(input: &str) -> IResult<&str, Vec<String>> {
-    delimited(
-        tag("targets("),
-        separated_list0(
-            delimited(multispace0, tag(","), multispace0),
-            map(target_identifier, |s: &str| s.to_string()),
-        ),
-        tag(")"),
-    )
-    .parse(input)
-}
-
-fn parse_dependencies(input: &str) -> IResult<&str, (Vec<String>, Vec<String>)> {
-    delimited(
-        tag("["),
-        separated_pair(parse_files, multispace1, parse_target_deps),
-        tag("]"),
-    )
-    .parse(input)
-}
-
-fn parse_commands(input: &str) -> IResult<&str, Vec<String>> {
-    let (input, content) = delimited(
-        delimited(multispace0, tag("{"), multispace0),
-        take_until("}"),
-        preceded(multispace0, tag("}")),
-    )
-    .parse(input)?;
-
-    let commands: Vec<String> = content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(String::from)
-        .collect();
-    Ok((input, commands))
-}
-
-fn parse_target(input: &str) -> IResult<&str, Target> {
-    let (input, _) = multispace0(input)?;
-    let (input, _) = tag("target")(input)?;
-    let (input, _) = multispace1(input)?;
-    let (input, name) = identifier(input)?;
-    let (input, outputs) = opt(preceded(multispace1, parse_outputs)).parse(input)?;
-    let outputs = outputs.unwrap_or_else(|| vec![name.to_string()]);
-    let (input, _) = multispace1(input)?;
-    let (input, (files, target_deps)) = parse_dependencies(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, commands) = parse_commands(input)?;
-
-    Ok((
-        input,
-        Target::new(name.to_string(), outputs, files, target_deps, commands),
-    ))
-}
-
-pub fn parse_makefile(input: &str) -> Option<Makefile> {
-    let (_, targets) = many0(parse_target).parse(input).ok()?;
-    Some(Makefile { targets })
-}
-
 impl Target {
     pub fn new(
         name: String,
@@ -302,4 +211,95 @@ impl Makefile {
             .build(&self)?;
         Ok(())
     }
+}
+
+fn identifier(input: &str) -> IResult<&str, &str> {
+    alphanumeric1(input)
+}
+
+fn file_identifier(input: &str) -> IResult<&str, &str> {
+    take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
+}
+
+fn parse_outputs(input: &str) -> IResult<&str, Vec<String>> {
+    delimited(
+        tag("outputs("),
+        separated_list0(multispace1, map(file_identifier, |s: &str| s.to_string())),
+        tag(")"),
+    )
+    .parse(input)
+}
+
+fn parse_files(input: &str) -> IResult<&str, Vec<String>> {
+    delimited(
+        tag("files("),
+        separated_list0(multispace1, map(file_identifier, |s: &str| s.to_string())),
+        tag(")"),
+    )
+    .parse(input)
+}
+
+fn target_identifier(input: &str) -> IResult<&str, &str> {
+    take_while1(|c: char| !c.is_whitespace() && c != ',' && c != ')')(input)
+}
+
+fn parse_target_deps(input: &str) -> IResult<&str, Vec<String>> {
+    delimited(
+        tag("targets("),
+        separated_list0(
+            delimited(multispace0, tag(","), multispace0),
+            map(target_identifier, |s: &str| s.to_string()),
+        ),
+        tag(")"),
+    )
+    .parse(input)
+}
+
+fn parse_dependencies(input: &str) -> IResult<&str, (Vec<String>, Vec<String>)> {
+    delimited(
+        tag("["),
+        separated_pair(parse_files, multispace1, parse_target_deps),
+        tag("]"),
+    )
+    .parse(input)
+}
+
+fn parse_commands(input: &str) -> IResult<&str, Vec<String>> {
+    let (input, content) = delimited(
+        delimited(multispace0, tag("{"), multispace0),
+        take_until("}"),
+        preceded(multispace0, tag("}")),
+    )
+    .parse(input)?;
+
+    let commands: Vec<String> = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect();
+    Ok((input, commands))
+}
+
+fn parse_target(input: &str) -> IResult<&str, Target> {
+    let (input, _) = multispace0(input)?;
+    let (input, _) = tag("target")(input)?;
+    let (input, _) = multispace1(input)?;
+    let (input, name) = identifier(input)?;
+    let (input, outputs) = opt(preceded(multispace1, parse_outputs)).parse(input)?;
+    let outputs = outputs.unwrap_or_else(|| vec![name.to_string()]);
+    let (input, _) = multispace1(input)?;
+    let (input, (files, target_deps)) = parse_dependencies(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, commands) = parse_commands(input)?;
+
+    Ok((
+        input,
+        Target::new(name.to_string(), outputs, files, target_deps, commands),
+    ))
+}
+
+pub fn parse_makefile(input: &str) -> Option<Makefile> {
+    let (_, targets) = many0(parse_target).parse(input).ok()?;
+    Some(Makefile { targets })
 }
