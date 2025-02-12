@@ -146,6 +146,7 @@ impl Target {
         &self.target_dependencies
     }
 
+    /// Helper function for getting oldest output last-modified time
     fn get_min_output_time(&self) -> Option<SystemTime> {
         let mut min_time = None;
         for output in &self.outputs {
@@ -167,6 +168,8 @@ impl Target {
     }
 
     fn is_up_to_date(&self, makefile: &Makefile) -> bool {
+        // If getting the last modified time failed assume that the file does not exist
+        // therefore we need to build
         let Some(target_mod_time) = self.get_min_output_time() else {
             return false;
         };
@@ -217,6 +220,7 @@ impl Target {
             return Ok(());
         }
 
+        // TODO: Proper command line parsing
         let mut children = vec![];
         for cmd in &self.commands {
             let parts: Vec<&str> = cmd.split_whitespace().collect();
