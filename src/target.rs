@@ -32,7 +32,6 @@ fn file_identifier(input: &str) -> IResult<&str, &str> {
     take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
 }
 
-/// Parses outputs in the form: outputs(file1 file2 ...)
 fn parse_outputs(input: &str) -> IResult<&str, Vec<String>> {
     delimited(
         tag("outputs("),
