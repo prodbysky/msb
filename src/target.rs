@@ -1,12 +1,98 @@
-use error_stack::ResultExt;
-use thiserror::Error;
-
 #[derive(Debug)]
 pub struct Target {
     name: String,
     file_dependencies: Vec<String>,
     target_dependencies: Vec<String>,
     commands: Vec<String>,
+}
+
+use nom::{
+    bytes::complete::{tag, take_until, take_while1},
+    character::complete::{alphanumeric1, multispace0, multispace1},
+    combinator::map,
+    multi::{many0, separated_list0},
+    sequence::{delimited, preceded, separated_pair},
+    IResult, Parser,
+};
+
+fn identifier(input: &str) -> IResult<&str, &str> {
+    alphanumeric1(input)
+}
+
+fn file_identifier(input: &str) -> IResult<&str, &str> {
+    take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
+}
+
+fn parse_files(input: &str) -> IResult<&str, Vec<String>> {
+    delimited(
+        tag("files("),
+        separated_list0(multispace1, map(file_identifier, |s: &str| s.to_string())),
+        tag(")"),
+    )
+    .parse(input)
+}
+
+fn target_identifier(input: &str) -> IResult<&str, &str> {
+    take_while1(|c: char| !c.is_whitespace() && c != ',' && c != ')')(input)
+}
+
+fn parse_target_deps(input: &str) -> IResult<&str, Vec<String>> {
+    delimited(
+        tag("targets("),
+        separated_list0(
+            delimited(multispace0, tag(","), multispace0),
+            map(target_identifier, |s: &str| s.to_string()),
+        ),
+        tag(")"),
+    )
+    .parse(input)
+}
+
+fn parse_dependencies(input: &str) -> IResult<&str, (Vec<String>, Vec<String>)> {
+    delimited(
+        tag("["),
+        separated_pair(parse_files, multispace1, parse_target_deps),
+        tag("]"),
+    )
+    .parse(input)
+}
+
+fn parse_commands(input: &str) -> IResult<&str, Vec<String>> {
+    let (input, content) = delimited(
+        delimited(multispace0, tag("{"), multispace0),
+        take_until("}"),
+        preceded(multispace0, tag("}")),
+    )
+    .parse(input)?;
+
+    let commands: Vec<String> = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect();
+    Ok((input, commands))
+}
+
+fn parse_target(input: &str) -> IResult<&str, Target> {
+    let (input, _) = multispace0(input)?;
+    let (input, _) = tag("target")(input)?;
+    let (input, _) = multispace1(input)?;
+    let (input, name) = identifier(input)?;
+    let (input, _) = multispace1(input)?;
+    let (input, (files, target_deps)) = parse_dependencies(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, commands) = parse_commands(input)?;
+
+    Ok((
+        input,
+        Target::new(name.to_string(), files, target_deps, commands),
+    ))
+}
+
+pub fn parse_makefile(input: &str) -> Option<Makefile> {
+    let (_, targets) = many0(parse_target).parse(input).ok()?;
+    Some(Makefile { targets })
 }
 
 impl Target {
@@ -35,128 +121,11 @@ impl Target {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum ParseError {
-    #[error("Invalid target format found")]
-    InvalidTarget,
-    #[error("Invalid target header format found")]
-    InvalidTargetHeader,
-    #[error("Invalid dependencies format found")]
-    InvalidDependencies,
-    #[error("Missmatched braces found")]
-    MissmatchedBracesInFile,
-}
-
-pub type ParseResult<T> = error_stack::Result<T, ParseError>;
-
-impl Target {
-    fn from_str(s: &str) -> ParseResult<Target> {
-        let parts: Vec<&str> = s.trim().split('{').collect();
-        if parts.len() != 2 {
-            return Err(ParseError::InvalidTarget.into());
-        }
-
-        let header = parts[0].trim();
-        let header_parts: Vec<&str> = header.split('[').collect();
-        if header_parts.len() != 2 {
-            return Err(ParseError::InvalidTargetHeader.into());
-        }
-
-        let name = header_parts[0]
-            .trim_start_matches("target")
-            .trim()
-            .to_string();
-
-        let deps_str = header_parts[1].trim_end_matches(']');
-        let (file_deps, target_deps) = parse_dependencies(deps_str)?;
-
-        let commands_str = parts[1].trim_end_matches('}').trim();
-        let commands = commands_str
-            .split(';')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        Ok(Target::new(name, file_deps, target_deps, commands))
-    }
-}
-
-fn parse_dependencies(deps_str: &str) -> ParseResult<(Vec<String>, Vec<String>)> {
-    let parts: Vec<&str> = deps_str.split("targets(").collect();
-    if parts.len() != 2 {
-        return Err(ParseError::InvalidDependencies.into());
-    }
-
-    let files_str = parts[0]
-        .trim_start_matches("files(")
-        .trim()
-        .trim_end_matches(')');
-
-    let file_deps: Vec<String> = if files_str.is_empty() {
-        Vec::new()
-    } else {
-        files_str
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
-
-    let targets_str = parts[1].trim_end_matches(')').trim();
-    let target_deps: Vec<String> = if targets_str.is_empty() {
-        Vec::new()
-    } else {
-        targets_str
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
-
-    Ok((file_deps, target_deps))
-}
-
 #[derive(Debug)]
 pub struct Makefile {
     targets: Vec<Target>,
 }
 
-impl Makefile {
-    pub fn from_str(s: &str) -> ParseResult<Makefile> {
-        let mut targets = Vec::new();
-        let mut current_target = String::new();
-        let mut brace_count = 0;
-
-        for line in s.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            current_target.push_str(line);
-            current_target.push(' ');
-
-            brace_count += line.chars().filter(|&c| c == '{').count();
-            brace_count -= line.chars().filter(|&c| c == '}').count();
-
-            if brace_count == 0 && !current_target.trim().is_empty() {
-                if current_target.contains("target") {
-                    targets.push(
-                        Target::from_str(&current_target)
-                            .attach_printable("Failed to parse some target")?,
-                    );
-                }
-                current_target.clear();
-            }
-        }
-
-        if brace_count != 0 {
-            return Err(ParseError::MissmatchedBracesInFile.into());
-        }
-
-        Ok(Makefile { targets })
-    }
-}
 impl Target {
     pub fn build(&self, file: &Makefile) -> Option<()> {
         let pre_build = std::time::Instant::now();
