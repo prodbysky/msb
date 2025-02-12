@@ -14,5 +14,4 @@ target <Name> [files(...) targets(...)] {
 ```
 
 ## TODO
- - Incremental builds
  - Macros
