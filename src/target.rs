@@ -128,17 +128,10 @@ impl Target {
             return Ok(());
         }
 
-        // TODO: Proper command line parsing
         let mut children = vec![];
         for cmd in &self.commands {
-            let parts: Vec<&str> = cmd.split_whitespace().collect();
-            if parts.is_empty() {
-                continue;
-            }
-            let exe = parts[0];
-            let args = &parts[1..];
-            let mut command = std::process::Command::new(exe);
-            command.args(args);
+            let mut command = std::process::Command::new("sh");
+            command.arg("-c").arg(cmd);
             children.push(
                 command
                     .spawn()
