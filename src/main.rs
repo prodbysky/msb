@@ -14,10 +14,10 @@ fn main() -> AppResult {
     }
 
     let input_content =
-        std::fs::read_to_string(&config.input_name).change_context(AppError::FailedToReadInput)?;
+        std::fs::read_to_string(&config.input_name).change_context(AppError::ReadInput)?;
 
     let targets = target::parse_makefile(&input_content)
-        .ok_or(AppError::FailedToParseBuildFile)
+        .ok_or(AppError::ParseBuildFile)
         .attach_printable("failed to parse the .msb file")?;
 
     if config.print_targets {
@@ -43,7 +43,9 @@ fn main() -> AppResult {
         }
         return Ok(());
     }
-    targets.build(&config.target);
+    targets
+        .build(&config.target)
+        .change_context(AppError::BuildRequestedTarget)?;
 
     Ok(())
 }
@@ -51,9 +53,11 @@ fn main() -> AppResult {
 #[derive(Debug, Error)]
 enum AppError {
     #[error("A file system error occured when reading input build config")]
-    FailedToReadInput,
+    ReadInput,
     #[error("Failed to parse .msb file")]
-    FailedToParseBuildFile,
+    ParseBuildFile,
+    #[error("Some build error occured")]
+    BuildRequestedTarget,
 }
 
 type AppResult = error_stack::Result<(), AppError>;

@@ -1,11 +1,3 @@
-#[derive(Debug)]
-pub struct Target {
-    name: String,
-    file_dependencies: Vec<String>,
-    target_dependencies: Vec<String>,
-    commands: Vec<String>,
-}
-
 use nom::{
     bytes::complete::{tag, take_until, take_while1},
     character::complete::{alphanumeric1, multispace0, multispace1},
@@ -14,6 +6,17 @@ use nom::{
     sequence::{delimited, preceded, separated_pair},
     IResult, Parser,
 };
+
+use error_stack::ResultExt;
+use thiserror::Error;
+
+#[derive(Debug)]
+pub struct Target {
+    name: String,
+    file_dependencies: Vec<String>,
+    target_dependencies: Vec<String>,
+    commands: Vec<String>,
+}
 
 fn identifier(input: &str) -> IResult<&str, &str> {
     alphanumeric1(input)
@@ -126,28 +129,68 @@ pub struct Makefile {
     targets: Vec<Target>,
 }
 
+#[derive(Debug, Error)]
+pub enum BuildError {
+    #[error("Failed to spawn build process: {cmd}")]
+    FailedToSpawnProcess { cmd: String },
+    #[error("Failed to find target to build `{dependency_name}` for target `{target_name}`")]
+    FailedToFindTargetForDependency {
+        target_name: String,
+        dependency_name: String,
+    },
+    #[error("Failed to find target `{target_name}` to build")]
+    FailedToFindTargetToBuild { target_name: String },
+    #[error("Some build process failed to start")]
+    BuildProcessFailedToStart,
+    #[error("Failed to get build process exit code")]
+    FailedToGetChildExitCode,
+
+    #[error("Build process quit with non-zero exit code")]
+    BuildProcessQuitWithNonZero,
+}
+
+pub type BuildResult<T> = error_stack::Result<T, BuildError>;
+
 impl Target {
-    pub fn build(&self, file: &Makefile) -> Option<()> {
+    pub fn build(&self, file: &Makefile) -> BuildResult<()> {
         let pre_build = std::time::Instant::now();
         for t_dep in &self.target_dependencies {
-            file.get_target(t_dep)?.build(file);
+            match file.get_target(t_dep) {
+                None => {
+                    return Err(BuildError::FailedToFindTargetForDependency {
+                        target_name: self.name.clone(),
+                        dependency_name: t_dep.to_string(),
+                    }
+                    .into());
+                }
+                Some(t) => t.build(file)?,
+            }
         }
 
         let mut build_children = vec![];
-        for cmd in self
-            .commands
-            .iter()
-            .map(|s| s.split_whitespace().collect::<Vec<_>>())
-        {
-            let exe = cmd[0];
-            let args = &cmd[1..];
-            let mut cmd = std::process::Command::new(exe);
-            cmd.args(args);
-            build_children.push(cmd.spawn().unwrap());
+        for cmd in &self.commands {
+            let split = cmd.split_whitespace().collect::<Vec<_>>();
+            let exe = split[0];
+            let args = &split[1..];
+            let mut cmd_proc = std::process::Command::new(exe);
+            cmd_proc.args(args);
+            build_children.push(cmd_proc.spawn().change_context(
+                BuildError::FailedToSpawnProcess {
+                    cmd: cmd.to_string(),
+                },
+            )?);
         }
 
         for mut c in build_children {
-            c.wait().unwrap();
+            match c
+                .wait()
+                .change_context(BuildError::BuildProcessFailedToStart)?
+                .code()
+                .ok_or(BuildError::FailedToGetChildExitCode)?
+            {
+                x if x != 0 => Err(BuildError::BuildProcessQuitWithNonZero),
+                _ => Ok(()),
+            }?;
         }
         println!(
             "Building target `{}` took: {:.2?}",
@@ -155,7 +198,7 @@ impl Target {
             pre_build.elapsed()
         );
 
-        Some(())
+        Ok(())
     }
 }
 
@@ -168,8 +211,12 @@ impl Makefile {
         self.targets.iter().find(|t| t.name == name)
     }
 
-    pub fn build(self, target: &str) -> Option<()> {
-        self.get_target(target)?.build(&self);
-        Some(())
+    pub fn build(self, target: &str) -> BuildResult<()> {
+        self.get_target(target)
+            .ok_or(BuildError::FailedToFindTargetToBuild {
+                target_name: target.to_string(),
+            })?
+            .build(&self)?;
+        Ok(())
     }
 }
