@@ -10,7 +10,7 @@ fn main() -> AppResult {
     if let Err(e) = config.validate() {
         eprintln!("Error: {e}");
         eprintln!("Run with -h to print help");
-        std::process::exit(1);
+        return Ok(());
     }
 
     let input_content =
