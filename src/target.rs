@@ -93,21 +93,12 @@ fn parse_commands(input: &str) -> IResult<&str, Vec<String>> {
     Ok((input, commands))
 }
 
-/// Parses a complete target declaration. The syntax is now:
-///
-/// ```ignore
-/// target <name> [ outputs(<out1> <out2> ...)] [ files(... targets(...)] { ... }
-/// ```
-///
-/// If no outputs are given, the target’s name is used as its only output.
 fn parse_target(input: &str) -> IResult<&str, Target> {
     let (input, _) = multispace0(input)?;
     let (input, _) = tag("target")(input)?;
     let (input, _) = multispace1(input)?;
     let (input, name) = identifier(input)?;
-    // Optionally parse outputs.
     let (input, outputs) = opt(preceded(multispace1, parse_outputs)).parse(input)?;
-    // If no outputs are provided, default to the target’s name.
     let outputs = outputs.unwrap_or_else(|| vec![name.to_string()]);
     let (input, _) = multispace1(input)?;
     let (input, (files, target_deps)) = parse_dependencies(input)?;
@@ -205,7 +196,6 @@ impl Target {
         true
     }
 
-    /// Build the target (the dependencies too)
     pub fn build(&self, makefile: &Makefile) -> BuildResult<()> {
         let pre_build = Instant::now();
 
