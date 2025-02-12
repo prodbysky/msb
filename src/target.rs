@@ -1,18 +1,24 @@
 use nom::{
     bytes::complete::{tag, take_until, take_while1},
     character::complete::{alphanumeric1, multispace0, multispace1},
-    combinator::map,
+    combinator::{map, opt},
     multi::{many0, separated_list0},
     sequence::{delimited, preceded, separated_pair},
     IResult, Parser,
 };
 
 use error_stack::ResultExt;
+use std::{
+    fs,
+    path::Path,
+    time::{Instant, SystemTime},
+};
 use thiserror::Error;
 
 #[derive(Debug)]
 pub struct Target {
     name: String,
+    outputs: Vec<String>,
     file_dependencies: Vec<String>,
     target_dependencies: Vec<String>,
     commands: Vec<String>,
@@ -24,6 +30,16 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 
 fn file_identifier(input: &str) -> IResult<&str, &str> {
     take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
+}
+
+/// Parses outputs in the form: outputs(file1 file2 ...)
+fn parse_outputs(input: &str) -> IResult<&str, Vec<String>> {
+    delimited(
+        tag("outputs("),
+        separated_list0(multispace1, map(file_identifier, |s: &str| s.to_string())),
+        tag(")"),
+    )
+    .parse(input)
 }
 
 fn parse_files(input: &str) -> IResult<&str, Vec<String>> {
@@ -77,11 +93,22 @@ fn parse_commands(input: &str) -> IResult<&str, Vec<String>> {
     Ok((input, commands))
 }
 
+/// Parses a complete target declaration. The syntax is now:
+///
+/// ```ignore
+/// target <name> [ outputs(<out1> <out2> ...)] [ files(... targets(...)] { ... }
+/// ```
+///
+/// If no outputs are given, the target’s name is used as its only output.
 fn parse_target(input: &str) -> IResult<&str, Target> {
     let (input, _) = multispace0(input)?;
     let (input, _) = tag("target")(input)?;
     let (input, _) = multispace1(input)?;
     let (input, name) = identifier(input)?;
+    // Optionally parse outputs.
+    let (input, outputs) = opt(preceded(multispace1, parse_outputs)).parse(input)?;
+    // If no outputs are provided, default to the target’s name.
+    let outputs = outputs.unwrap_or_else(|| vec![name.to_string()]);
     let (input, _) = multispace1(input)?;
     let (input, (files, target_deps)) = parse_dependencies(input)?;
     let (input, _) = multispace0(input)?;
@@ -89,7 +116,7 @@ fn parse_target(input: &str) -> IResult<&str, Target> {
 
     Ok((
         input,
-        Target::new(name.to_string(), files, target_deps, commands),
+        Target::new(name.to_string(), outputs, files, target_deps, commands),
     ))
 }
 
@@ -101,12 +128,14 @@ pub fn parse_makefile(input: &str) -> Option<Makefile> {
 impl Target {
     pub fn new(
         name: String,
+        outputs: Vec<String>,
         file_dependencies: Vec<String>,
         target_dependencies: Vec<String>,
         commands: Vec<String>,
     ) -> Self {
         Self {
             name,
+            outputs,
             file_dependencies,
             target_dependencies,
             commands,
@@ -116,11 +145,124 @@ impl Target {
     pub fn name(&self) -> &str {
         &self.name
     }
+    pub fn outputs(&self) -> &[String] {
+        &self.outputs
+    }
     pub fn file_dependencies(&self) -> &[String] {
         &self.file_dependencies
     }
     pub fn target_dependencies(&self) -> &[String] {
         &self.target_dependencies
+    }
+
+    fn get_min_output_time(&self) -> Option<SystemTime> {
+        let mut min_time = None;
+        for output in &self.outputs {
+            let path = Path::new(output);
+            let metadata = fs::metadata(path).ok()?;
+            let modified = metadata.modified().ok()?;
+            min_time = Some(match min_time {
+                None => modified,
+                Some(current) => {
+                    if modified < current {
+                        modified
+                    } else {
+                        current
+                    }
+                }
+            });
+        }
+        min_time
+    }
+
+    fn is_up_to_date(&self, makefile: &Makefile) -> bool {
+        let Some(target_mod_time) = self.get_min_output_time() else {
+            return false;
+        };
+
+        for dep in &self.file_dependencies {
+            let dep_path = Path::new(dep);
+            let Ok(dep_mod_time) = fs::metadata(dep_path).and_then(|meta| meta.modified()) else {
+                return false;
+            };
+            if dep_mod_time > target_mod_time {
+                return false;
+            }
+        }
+
+        for dep_name in &self.target_dependencies {
+            if let Some(dep_target) = makefile.get_target(dep_name) {
+                let Some(dep_mod_time) = dep_target.get_min_output_time() else {
+                    return false;
+                };
+                if dep_mod_time > target_mod_time {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Build the target (the dependencies too)
+    pub fn build(&self, makefile: &Makefile) -> BuildResult<()> {
+        let pre_build = Instant::now();
+
+        for dep in &self.target_dependencies {
+            match makefile.get_target(dep) {
+                None => {
+                    return Err(BuildError::FailedToFindTargetForDependency {
+                        target_name: self.name.clone(),
+                        dependency_name: dep.to_string(),
+                    }
+                    .into());
+                }
+                Some(target_dep) => target_dep.build(makefile)?,
+            }
+        }
+
+        if self.is_up_to_date(makefile) {
+            println!("Target `{}` is up-to-date, skipping build.", self.name);
+            return Ok(());
+        }
+
+        let mut children = vec![];
+        for cmd in &self.commands {
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let exe = parts[0];
+            let args = &parts[1..];
+            let mut command = std::process::Command::new(exe);
+            command.args(args);
+            children.push(
+                command
+                    .spawn()
+                    .change_context(BuildError::FailedToSpawnProcess {
+                        cmd: cmd.to_string(),
+                    })?,
+            );
+        }
+
+        for mut child in children {
+            let exit_code = child
+                .wait()
+                .change_context(BuildError::BuildProcessFailedToStart)?
+                .code()
+                .ok_or(BuildError::FailedToGetChildExitCode)?;
+            if exit_code != 0 {
+                return Err(BuildError::BuildProcessQuitWithNonZero.into());
+            }
+        }
+
+        println!(
+            "Building target `{}` took: {:.2?}",
+            self.name,
+            pre_build.elapsed()
+        );
+        Ok(())
     }
 }
 
@@ -144,63 +286,11 @@ pub enum BuildError {
     BuildProcessFailedToStart,
     #[error("Failed to get build process exit code")]
     FailedToGetChildExitCode,
-
     #[error("Build process quit with non-zero exit code")]
     BuildProcessQuitWithNonZero,
 }
 
 pub type BuildResult<T> = error_stack::Result<T, BuildError>;
-
-impl Target {
-    pub fn build(&self, file: &Makefile) -> BuildResult<()> {
-        let pre_build = std::time::Instant::now();
-        for t_dep in &self.target_dependencies {
-            match file.get_target(t_dep) {
-                None => {
-                    return Err(BuildError::FailedToFindTargetForDependency {
-                        target_name: self.name.clone(),
-                        dependency_name: t_dep.to_string(),
-                    }
-                    .into());
-                }
-                Some(t) => t.build(file)?,
-            }
-        }
-
-        let mut build_children = vec![];
-        for cmd in &self.commands {
-            let split = cmd.split_whitespace().collect::<Vec<_>>();
-            let exe = split[0];
-            let args = &split[1..];
-            let mut cmd_proc = std::process::Command::new(exe);
-            cmd_proc.args(args);
-            build_children.push(cmd_proc.spawn().change_context(
-                BuildError::FailedToSpawnProcess {
-                    cmd: cmd.to_string(),
-                },
-            )?);
-        }
-
-        for mut c in build_children {
-            match c
-                .wait()
-                .change_context(BuildError::BuildProcessFailedToStart)?
-                .code()
-                .ok_or(BuildError::FailedToGetChildExitCode)?
-            {
-                x if x != 0 => Err(BuildError::BuildProcessQuitWithNonZero),
-                _ => Ok(()),
-            }?;
-        }
-        println!(
-            "Building target `{}` took: {:.2?}",
-            self.name,
-            pre_build.elapsed()
-        );
-
-        Ok(())
-    }
-}
 
 impl Makefile {
     pub fn get_targets(&self) -> &Vec<Target> {
