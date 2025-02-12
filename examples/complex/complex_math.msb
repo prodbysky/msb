@@ -2,19 +2,19 @@ target main [files(main.c) targets(add, sub, mul, div)] {
     gcc main.c -o main add.o sub.o mul.o div.o
 }
 
-target add [files(add.c, add.h) targets()] {
+target add [files(add.c add.h) targets()] {
     gcc add.c -c -o add.o
 }
 
-target sub [files(sub.c, sub.h) targets()] {
+target sub [files(sub.c sub.h) targets()] {
     gcc sub.c -c -o sub.o
 }
 
 
-target mul [files(mul.c, mul.h) targets()] {
+target mul [files(mul.c mul.h) targets()] {
     gcc mul.c -c -o mul.o
 }
 
-target div [files(div.c, div.h) targets()] {
+target div [files(div.c div.h) targets()] {
     gcc div.c -c -o div.o
 }
