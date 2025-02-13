@@ -207,7 +207,7 @@ impl Makefile {
 }
 
 fn identifier(input: &str) -> IResult<&str, &str> {
-    alphanumeric1(input)
+    take_while1(|c: char| c.is_alphanumeric() || c == '_' || c == '.')(input)
 }
 
 fn file_identifier(input: &str) -> IResult<&str, &str> {
@@ -233,16 +233,13 @@ fn parse_files(input: &str) -> IResult<&str, Vec<String>> {
 }
 
 fn target_identifier(input: &str) -> IResult<&str, &str> {
-    take_while1(|c: char| !c.is_whitespace() && c != ',' && c != ')')(input)
+    take_while1(|c: char| !c.is_whitespace() && c != ')')(input)
 }
 
 fn parse_target_deps(input: &str) -> IResult<&str, Vec<String>> {
     delimited(
         tag("targets("),
-        separated_list0(
-            delimited(multispace0, tag(","), multispace0),
-            map(target_identifier, |s: &str| s.to_string()),
-        ),
+        separated_list0(multispace1, map(target_identifier, |s: &str| s.to_string())),
         tag(")"),
     )
     .parse(input)

@@ -1,4 +1,4 @@
-target main [files(main.c) targets(add, sub, mul, div)] {
+target main [files(main.c) targets(add sub mul div)] {
     gcc main.c -o main add.o sub.o mul.o div.o
 }
 
