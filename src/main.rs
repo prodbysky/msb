@@ -20,7 +20,6 @@ fn main() -> AppResult {
         .ok_or(AppError::ParseBuildFile)
         .attach_printable("failed to parse the .msb file")?;
 
-    dbg!(&targets);
     if config.print_targets {
         for (i, target) in targets.get_targets().iter().enumerate() {
             println!("{}: {}", i, target.name());
